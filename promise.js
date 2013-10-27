@@ -235,9 +235,8 @@ function _resolution (promise,x)
     }
     
     // X is not conforming to this implementation, but may have a then-function, a socalled "thenable"
-    // Remember typeof x === 'object' even if x instanceof Promise 
     
-    else if ((!(x instanceof Promise) && typeofx === 'object' && x !== null) || typeofx === 'function') 
+    else if ((typeofx === 'object' && x !== null) || typeofx === 'function')
    
     {
         
