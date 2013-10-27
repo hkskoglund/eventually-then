@@ -3,7 +3,7 @@
 //define(function (require, exports, module) {
 'use strict';
 
-// Based on http://promisesaplus.com/#notes, but no support for more advanced resolution of promise inside callbacks
+// Based on http://promisesaplus.com/#notes
 
 // "A promise represents the eventual result of an asynchronous operation"
 
