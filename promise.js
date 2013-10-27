@@ -1,13 +1,11 @@
-/* globals console: true, setTimeout: true, Uint8Array: true  */
+/* globals define:true, setTimeout: true, Uint8Array: true  */
+
+//define(function (require, exports, module) {
 'use strict';
 
-// Based on http://promisesaplus.com/#notes
+// Based on http://promisesaplus.com/#notes, but no support for more advanced resolution of promise inside callbacks
 
 // "A promise represents the eventual result of an asynchronous operation"
-
-// Then-method registers callback for
-//  FULFILLMENT(value) : 1. the promise's eventual value
-//  REJECTION(reason) : 2. the reason why the promise cannot be fulfilled
 
 function Promise()
 {
@@ -19,20 +17,15 @@ function Promise()
   // Why promise was rejected
   this.reason = undefined;
     
- // Allow for multiple .then calls
+ // Allow for multiple .then calls to store callbacks to run on transition from pending to either fullfilment or rejection
  
     this.onFulfilled = [];
     
     this.onRejected = [];
-    
-  // A promise only as a single chained promise
-    //this.promise2 = undefined;
-    
-    // Used when a fulfillment/rejection-handler returns a .then function
-    
-     this._resolvePromiseCalled = false;
-    
-     this._rejectPromiseCalled = false;
+
+    this.chainedPromise = [];
+   // this.chainedPromise = undefined;
+ 
 }
 
 Promise.prototype.STATE = {
@@ -43,124 +36,127 @@ Promise.prototype.STATE = {
 
 Promise.prototype.toString = function ()
 {
-    return "Promise is "+ this.state+' #onFulfilled '+this.onFulfilled.length+' #onRejected '+this.onRejected.length;
+    var msg = this.state.toString();
+    
+    if (this.state === Promise.prototype.STATE.FULFILLED)
+        msg += ' value: '+JSON.stringify(this.value);
+    
+    else if (this.state === Promise.prototype.STATE.REJECTED)
+        msg += ' reason: '+this.reason;
+    
+    msg += ' onFulfilled# '+this.onFulfilled.length+' onRejected# '+this.onRejected.length;
+    
+    return msg;
 };
 
 // "To ensure that onFulfilled and onRejected execute asynchronously,...with a fresh stack"
 // This function is called  via setTimeout
 // Aim: to gather result from callbacks or handle exceptions 
-Promise.prototype._runInSequence = function ()
+Promise.prototype._executeHandlers = function (handlers,result)
 {
-   
     var  handlerResult,
-         handlerThrowed,
          handler,
-        handlers,
-        result;
+         chainedPromise,
+        showChainedPromiseState = function (promise)
+    {
+//        if (promise)
+//        console.log("Chained state : "+promise.toString());
+    };
     
         // Loop callbacks in the order of "their originating calls to then"
         
-     // console.log(this.toString());
+    // console.log("Running callbacks for promise : ",this.toString());
     
-      if (this.state === Promise.prototype.STATE.FULFILLED) {
-          handlers = this.onFulfilled;
-          result = this.value;
-      }
-      else if (this.state === Promise.prototype.STATE.REJECTED) {
-          handlers = this.onRejected;
-          result = this.reason;
-      }
-    
+       // Seems quite similar to event listening, everybody get the value if promise is fullfilled
+
         for (var handlerNr=0, len = handlers.length; handlerNr < len; handlerNr++) {
-         
+
+        showChainedPromiseState(chainedPromise);
+            
             handler = handlers.shift();
-             
+            chainedPromise = this.chainedPromise.shift();
                 
-              
                 if (typeof handler === 'function') {
                        handlerResult = undefined; // Assume no result
-                       handlerThrowed = false;
-                   // console.log("Handlernr",handlerNr,"Handler=",handler,"Argument = ",result);
+                     
+                  //console.log("Handler#",handlerNr,"Handler=",handler,"Argument= ",result,"chainedPromise",chainedPromise.toString());
                    
                        try {
+                           
                            handlerResult = handler(result);
-                       //    console.log("Handler result",handlerResult,this);
+                        //  console.log("Handler result",handlerResult);
+                      
                          
                        } catch (e)
                        {
-                           handlerThrowed = true;
-                          
-                           this.promise2.reject(e);
                            
+                           //console.log("Handler throwed ",e,chainedPromise);
+                          
+                           chainedPromise.reject(e);
+                           
+                           continue;
                           
                        }
-                    
-                      if (handlerResult === undefined)
-                      {
-                          if (this.state === Promise.prototype.STATE.REJECTED)
-                          {
-                             this.promise2.reject(this.reason);
-                          } else if (this.state === Promise.prototype.STATE.FULFILLED)
-                          {
-                              this.promise2.fulfill(this.value);
-                          }
-                      }
-                    
-                        // Now, take care of result from handler
+                     
+                     _resolution(chainedPromise,handlerResult);   
+                  
                        
-                        if (handlerResult !== undefined && !handlerThrowed) {
-                          
-                           this._resolution(this.promise2,handlerResult);   
-                        }
-                       
-                   } else
+                   } else // Handler was not a function, propagate result to chained promise
                    {
-                       
+                      
                        if (this.state === Promise.prototype.STATE.FULFILLED)
-                           this.promise2.fulfill(result);
+                           chainedPromise.fulfill(result);
                        else if (this.state === Promise.prototype.STATE.REJECTED)
-                           this.promise2.reject(result);
+                           chainedPromise.reject(result);
                        
-                      // console.log("Promise2:",this.promise2.toString());
+                      // console.log("chainedPromise:",this.chainedPromise.toString());
                    }
                 
             }
-            
+    
+           showChainedPromiseState(chainedPromise);
            
 };
 
-
+    
+// Then-method registers callback for
+//  FULFILLMENT(value) : 1. the promise's eventual value
+//  REJECTION(reason) : 2. the reason why the promise cannot be fulfilled
 
 Promise.prototype.then = function (onFulfilled, onRejected)
 {
   //console.log("THEN",typeof this.chainedPromise);
        
-    this.promise2 = new Promise();
+    var chainedPromise = new Promise();
+    
+    this.chainedPromise.push(chainedPromise);
+    //this.chainedPromise = chainedPromise;
     
     this.onFulfilled.push(onFulfilled);
-   
-    this.onRejected.push(onRejected);
+     this.onRejected.push(onRejected);
    
     // Schedule sequential run of handlers if present state is not pending (already fullfilled/rejected)
-    if (this.state !== Promise.prototype.STATE.PENDING) {
+    if (this.state === Promise.prototype.STATE.FULFILLED) {
        // console.log("THEN: Scheduling immediate run of callbacks");
-        setTimeout(this._runInSequence.bind(this),0);
+        setTimeout(this._executeHandlers.bind(this),0,this.onFulfilled,this.value);
+    } else if (this.state === Promise.prototype.STATE.REJECTED) {
+         setTimeout(this._executeHandlers.bind(this),0,this.onRejected,this.reason);
     }
     
-    return this.promise2;
+    return chainedPromise;
     
 };
 
 Promise.prototype.fulfill = function (value)
 { 
-        
-  
+    
     if (this.state !== Promise.prototype.STATE.PENDING) {
      
 //        console.trace();
-        //console.log("Promise is not pending " +this.state+" cannot fulfill it.");
+//        console.log("Promise is not pending " +this.state+" cannot fulfill it.");
        return;
     }
+ //   console.log("fulfill!",this.onFulfilled);
 
     // Make state and value read-only -> immutable
     
@@ -170,12 +166,12 @@ Promise.prototype.fulfill = function (value)
     
     Object.defineProperty(this,'value',{ value : value,
                                         writable : false});
-
+    
     // console.log("Inside fulfill",this.toString());
     // Call onFullfilled-handler
     if (this.onFulfilled.length > 0) {
       // console.log("Fulfilled, running sequence");
-        setTimeout(this._runInSequence.bind(this),0);
+       setTimeout(this._executeHandlers.bind(this),0,this.onFulfilled,this.value);
     }
 //     else
 //        console.log("No onFullfilled callbacks registered with .then, will only 'fire' when .then is called");
@@ -198,262 +194,140 @@ Promise.prototype.reject = function (reason)
     
     Object.defineProperty(this,'reason',{ value : reason,
                                         writable : false});
-    
-
+   
     // Fire onRejected-handlers
     if (this.onRejected.length > 0)
-     setTimeout(this._runInSequence.bind(this),0,this.onRejected,this.reason);
+     setTimeout(this._executeHandlers.bind(this),0,this.onRejected,this.reason);
 //    else
 //        console.log("No onRejected callbacks specified with .then, will only 'fire' when .then is called");
     
  
 };
-
-
-
-Promise.prototype._resolution = function (promise,x)
+    
+function _resolution (promise,x)
 {
-    
-    var then,  
-        xIsFunc = (typeof x === 'function'),
+   var typeofx = typeof x,
+       then;
         
-        resolvePromise = function (y)
-                    {
-                        if (this.resolvePromiseCalled)
-                            console.log("Resolvepromise already called, ignoring");
-                        else {
-                          this.resolvePromiseCalled = true;
-                            this._resolution(this,y);
-                        }
-                        
-                    },
-                        
-         rejectPromise = function (r)
-                    {
-                        if (this.rejectPromiseCalled)
-                            console.log("rejectpromisecalled");
-                        else {
-                            this.rejectPromiseCalled = true;
-                           this.reject(r);
-                        }
-                           
-                    };
-      
-       
-    // Promise and x refer to same object
+    // X refer to same object as promise -> impossible to resolve
     
-    if (promise === x)
+    if (x === promise)
+       
+        promise.reject(new TypeError('Chained promise cannot be resolved with it self')); 
+    
+    // X is a promise conforming to current implementation
+    
+    else if (x instanceof Promise) 
     {
-       // console.log("Chained promise is the same as result from handler!!!!!!!!!!!!!!!!!!");
-       promise.reject(new TypeError('Chained promise and result of onFulfilled/onRejected refer to same object'));
+
+            x.then(function _resolve(y)
+                   {
+                         _resolution(promise,y);
+
+                   }.bind(x),
+                function _reject (r)
+                {
+                
+                 promise.reject(r);
+                    
+                }.bind(x));
+  
     }
     
-    else if (x instanceof Promise)
-    {
-//        if (x.state === Promise.prototype.STATE.PENDING)
-//            return;
-        
-      //  console.log("!!!!!!!!!! x is a promise",x.toString());
-//        
-        // Adopt state
-        x.then(function (value)
-               {
-                   //console.log("HELLO",value,this);
-                  // console.log("pre-state:",this.state,this.value);
-                   this.fulfill(value);
-                 //  console.log("post-state:",this.state,this.value);
-               }.bind(promise),
-            
-              function (reason)
-        {
-            
-                // console.log("pre-state:",this.state,this.reason);
-                   this.reject(reason);
-                //   console.log("post-state:",this.state,this.reason);
-               }.bind(promise)
-               );
+    // X is not conforming to this implementation, but may have a then-function, a socalled "thenable"
+    // Remember typeof x === 'object' even if x instanceof Promise 
     
-
-
-        
-    } 
-    
-    /////////////////////
-    else if ((typeof x === 'object' || xIsFunc) && x!==null) 
+    else if ((!(x instanceof Promise) && typeofx === 'object' && x !== null) || typeofx === 'function') 
    
     {
-        // console.log("TRYING to access .then",x);
+        
+        // In case x === null, continuing here would lead to a TypeError: Cannot read property 'then' of null
+       
         try {
-          then = x.then;
-         
-           
-            if (typeof then === 'function')
-            {
-             //   console.log("then=x.then=",then);
-                
-                try {
-                    
-                  then.call(x,resolvePromise.bind(promise),rejectPromise.bind(promise));
-                       
-                } catch (e)
-                {
-                   // console.log("CATCHED, accessing .then",promise);
-                  if (!promise.resolvePromiseCalled && !promise.rejectPromiseCalled)
-                        promise.reject(e);
-                }
-           }
-            else // Object
-            {
-               // console.log("result was an object, fullfilling chained promise with",x,promise);
-                
-                promise.fulfill(x);
-                //console.log("post",promise);
-            }
             
-        } catch (e)
-        {
-           // console.log("Catched error accessing .then",e);
-            promise.reject(e);
+            then = x.then;
+            
         }
-    }
+        
+        // Failed retrieving of the property x.then
+        
+        catch (e)
+        {
+            promise.reject(e);
+            
+            return;
+        }
+            
+        // x have a then function, is a "thenable"
+     
+        if (typeof then === 'function')
+        {
+         
+          
+            try {
+              
+              then.call(x,function _resolvePromise (y)
+                        {
+                          
+                               if (this.resolveCalled || this.rejectCalled)
+                                   return;
+                            
+                                this.resolveCalled = true;
+                            
+                                  _resolution(promise,y);
+                          
+                         
+                            }.bind(x),
+                  
+                  function _rejectPromise (r)
+              {
+                    if (this.rejectCalled || this.resolveCalled)
+                        return;
+                  
+                      this.rejectCalled = true;
+                      
+                      promise.reject(r);
+                  
+                  }.bind(x));
+            
+                   
+            } catch (e)
+            {
+               if (!x.rejectCalled &&  !x.resolveCalled)
+                  promise.reject(e);
+                
+            }
+       }
+        
+        // x does not have a then function is of type object 
+        
+        else // Object
+        {
+           // console.log("result was an object, fullfilling chained promise with",x,promise);
+            
+            promise.fulfill(x);
+            
+           // console.log("Post-state",promise.state,promise.onFulfilled[0]);
+         
+        }
+        
+            
+    } 
+        
+        
     
-    else if (!xIsFunc)
+    
+    else if (typeofx !== 'function')
     
     {
-     //console.log("Result was not an object (maybe null) or a function",x);
-     
-        
+    
         promise.fulfill(x);
     }
-};
+}
 
-//function MockAPI()
-//{
-//}
+
+
 //
-//MockAPI.prototype.resetSystem = function ()
-//{
-//    var eventuallyReset = new Promise();
-//    var fakeUSBdata = new Uint8Array([1,2,3]);
-//    
-//    setTimeout(function () {
-//        if (Date.now() % 2)
-//            eventuallyReset.fulfill("Notification");
-//        else
-//            eventuallyReset.reject("LIBUSB: transfer failed");
-//    },1000);
-//    
-//    return eventuallyReset;
-//};
-//
-//var mockApi =new MockAPI();
-//var promise = mockApi.resetSystem()
-//                    .then(function (value) { 
-//                        console.log("Fulfillment callback with value",value); 
-//                       // throw new Error('Something went wrong in fullfillment callback');
-//                       // return 10;
-//                        
-//                        // Test : return promise
-////                        var p = new Promise();
-////                        p.then(function (value) { console.log("Promise inside fulfillment handler with value",value);
-////                                                 return 88;
-////                                                });
-////                        p.fulfill(100);
-////                        return p;
-//                        
-//                        // Test : return object
-//                        var o = {
-//                            a : 10 };
-//                        
-//                        // test: return function
-//                        
-//                        var f = {
-//                            then : function _then (fulfill,reject)
-//                            {
-//                                console.log("Yippi then called",fulfill,reject);
-//                                fulfill(1001);
-//                            }
-//                        };
-//                        
-//                        return f;
-//                    },
-//                          function (reason) { 
-//                              console.log("Rejection callback with reason",reason); 
-//                         //     throw new Error('Something went wrong i rejection callback');
-//                         //     return -10;
-//                                            })
-//                .then(function (value) {
-//                    console.log("Next fullfillment callback got",value);
-//                    return 5;
-//                })
-//                .then (function (value) {
-//                    console.log("Last fullfillment callback got",value);
-//                    throw new Error('Not so easy');
-//                    //return 1;
-//                });
-////console.log("Promise",promise);
-////var promise = (new Promise()).then(undefined,undefined).then(undefined,undefined);
-//setTimeout(function ()
-//           {
-//               console.log("Now promise",promise);
-//           },2000);
-
-//var p = new Promise();
-//p.fulfill(1);
-//p.then(function (value) {
-//return { then : function (onFulfillment,onRejection) 
-//        { onFulfillment(null);
-//         }
-//       };
-//});
-
-
-//p.then(function () { return 10; }).then(function (value) { console.log("Chained then got",value); });
-//p.then(function () { throw "Fail"; }).then(null, function (reason) { console.log("Chained then got ",reason); });
-////p.then(function () { return 99; }).then(function (value) { console.log("Chained then got",value); });
-
-//p.then(function () { return p; }).then(null, function (reason) { console.log("Reason is now",reason,reason instanceof TypeError); });
-
-
-//p.then(function _promiseHandler (value) {
-//            var p = new Promise();
-//            setTimeout(function () {
-//                console.log("Fulfilling promise",p);
-//                p.fulfill("100");
-//            },2050);
-//            
-//            return p;
-//        }).then(function _fullfilmentHandler(value) { console.log("Got from inner promise ",value); });
-//
-//console.log("p.chainedPromise",p.chainedPromise);
-//
-//var p = new Promise();
-//p.fulfill("Fulfill");
-//var finalresult = p.then();
-////p.fulfill("Testing");
-//////var finalresult = p.then().then(function (v) { console.log("Next then got",v); }).then(function (value) { console.log("Got value",value); });
-////var finalresult = p.then();
-////p.then(function (v) { console.log("v",v); });
-//////var nextResult = p.then();
-//////var nextResult = p.then(undefined,function (reason) {console.log("Got reason",reason); });
-//////.then().then(undefined,function (reason) { console.log("Finaly got",reason); });
-////console.log("Immediate result",finalresult);
-//setTimeout(function () { 
-//    console.log("Final result",finalresult);
-//},2000);
-//
-//var p = new Promise();
-//p.fulfill("Testing testing testing");
-//p.then(function (value)
-//       {
-//           var nextP = new Promise();
-//           setTimeout(function () {
-//               nextP.reject("NEXTP");
-//           },1000);
-//           return nextP;
-//       });
-
-
-
-
 module.exports = Promise;
+return module.exports;
+//});

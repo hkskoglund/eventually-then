@@ -3,8 +3,9 @@ var Promise = require('../promise.js');
 
 exports.resolved = function (value)
 {
-    
+   
     var promise = new Promise();
+   
     promise.fulfill(value);
     //console.log("ADAPTER RESOLVED",promise);
     return promise;
