@@ -1,4 +1,4 @@
-/* globals define:true, setTimeout: true, Uint8Array: true  */
+/* globals define:true, setTimeout: true, process: true, module:true, window: true, setImmediate  */
 
 //define(function (require, exports, module) {
 'use strict';
@@ -6,6 +6,22 @@
 // Based on http://promisesaplus.com/#notes
 
 // "A promise represents the eventual result of an asynchronous operation"
+
+var scheduleImmediately;
+
+// In node.js : process.nextTick run twice as fast as setTimeout, setImmediate have the same performance as nextTick
+
+if (typeof process !== 'undefined' & typeof process.nextTick === 'function') 
+    // Node - http://nodejs.org/api/process.html#process_process_nexttick_callback 
+    scheduleImmediately = process.nextTick;
+   else if (typeof setImmediate === 'function') 
+       // IE >=10 - http://ie.microsoft.com/testdrive/Performance/setImmediateSorting/Default.html
+       // https://developer.mozilla.org/en-US/docs/Web/API/Window.setImmediate
+       scheduleImmediately = setImmediate;
+    else
+        // 
+      scheduleImmediately =  setTimeout; // Default timeout should be 0 if not specified 
+   
 
 function Promise()
 {
@@ -97,7 +113,7 @@ Promise.prototype._executeHandlers = function (handlers,result)
                            continue;
                           
                        }
-                     
+                    
                      _resolution(chainedPromise,handlerResult);   
                   
                        
@@ -138,9 +154,15 @@ Promise.prototype.then = function (onFulfilled, onRejected)
     // Schedule sequential run of handlers if present state is not pending (already fullfilled/rejected)
     if (this.state === Promise.prototype.STATE.FULFILLED) {
        // console.log("THEN: Scheduling immediate run of callbacks");
-        setTimeout(this._executeHandlers.bind(this),0,this.onFulfilled,this.value);
+        //setTimeout(this._executeHandlers.bind(this),0,this.onFulfilled,this.value);
+       scheduleImmediately(function () {
+            this._executeHandlers(this.onFulfilled,this.value);
+        }.bind(this));
     } else if (this.state === Promise.prototype.STATE.REJECTED) {
-         setTimeout(this._executeHandlers.bind(this),0,this.onRejected,this.reason);
+       //  setTimeout(this._executeHandlers.bind(this),0,this.onRejected,this.reason);
+        scheduleImmediately(function () {
+            this._executeHandlers(this.onRejected,this.reason);
+        }.bind(this));
     }
     
     return chainedPromise;
@@ -171,7 +193,11 @@ Promise.prototype.fulfill = function (value)
     // Call onFullfilled-handler
     if (this.onFulfilled.length > 0) {
       // console.log("Fulfilled, running sequence");
-       setTimeout(this._executeHandlers.bind(this),0,this.onFulfilled,this.value);
+      // setTimeout(this._executeHandlers.bind(this),0,this.onFulfilled,this.value);
+          scheduleImmediately(function () {
+            this._executeHandlers(this.onFulfilled,this.value);
+        }.bind(this));
+        
     }
 //     else
 //        console.log("No onFullfilled callbacks registered with .then, will only 'fire' when .then is called");
@@ -197,7 +223,10 @@ Promise.prototype.reject = function (reason)
    
     // Fire onRejected-handlers
     if (this.onRejected.length > 0)
-     setTimeout(this._executeHandlers.bind(this),0,this.onRejected,this.reason);
+    // setTimeout(this._executeHandlers.bind(this),0,this.onRejected,this.reason);
+    process.nextTick(function () {
+            this._executeHandlers(this.onRejected,this.reason);
+        }.bind(this));
 //    else
 //        console.log("No onRejected callbacks specified with .then, will only 'fire' when .then is called");
     
@@ -323,6 +352,13 @@ function _resolution (promise,x)
         promise.fulfill(x);
     }
 }
+
+//var promisesAplusTests = require("promises-aplus-tests");
+//var adapter = require('./test/adapter.js');
+//
+//promisesAplusTests(adapter, function (err) {
+//    // All done; output is in the console. Or check `err` for number of failures.
+//});
 
 
 
